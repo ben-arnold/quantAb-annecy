@@ -1,0 +1,318 @@
+---
+title: "Cambodia Ab study"
+output:
+  html_notebook:
+    highlight: haddock
+    theme: default
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+---
+
+
+# Preamble
+```{r preamble}
+library(here)
+here()
+
+library(tidyverse)
+library(mgcv)
+```
+
+# Load Cambodia measurements
+
+
+```{r load data, warning=FALSE}
+d <- readRDS(here("data","cambodia_serology_public.rds"))
+
+# create age strata
+d <- d %>%
+  filter(age<=75) %>%
+  mutate(agecat = cut(age,breaks=c(14,20,25,30,35,40))) 
+
+# reshape to long format
+dl <- d %>%
+  select(psuid,age,agecat,pfmsp19,nie,t24) %>%
+  gather(key=antigen,value=mfi,-psuid,-age,-agecat) %>%
+  mutate(antigen = factor(antigen,levels=c("pfmsp19","nie","t24"))) %>%
+  group_by(psuid,antigen) %>%
+  arrange(psuid,antigen,age)
+
+dl <- dl %>%
+  mutate(logmfi = ifelse(mfi>0,log10(mfi),log10(1)))
+
+# add ROC-based cutoffs, published by Priest et al. 2016 PLOS
+# http://journals.plos.org/plosntds/article?id=10.1371/journal.pntd.0004699
+dl$roccut <- NA
+dl$mixcut <- NA
+dl$roccut[dl$antigen %in% "pfmsp19"] <- log10(343)
+dl$roccut[dl$antigen %in% "nie"] <- log10(792)
+dl$roccut[dl$antigen %in% "t24"] <- log10(486)
+
+# define seroprevalence based on ROC cutoffs
+dl <- dl %>%
+  mutate(seropos = ifelse(logmfi>roccut,1,0))
+```
+
+
+# Age stratified distributions
+
+```{r density plot by age}
+
+table(dl$agecat,dl$antigen)
+
+# stratified by age
+pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
+  facet_grid(agecat~antigen) +
+  geom_density(alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = roccut),lty=1) +
+  # geom_vline(aes(xintercept = mixcut),lty=2) +
+  labs(x="log10 luminex response (MFI-bg)") +
+  theme_minimal() + 
+  theme(legend.position = "none",
+        strip.text.y=element_text(angle=0))
+
+pdist
+
+# unstratified
+pdist2 <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
+  facet_grid(~antigen) +
+  geom_density(alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = roccut),lty=1) +
+  # geom_vline(aes(xintercept = mixcut),lty=2) +
+  labs(x="log10 luminex response (MFI-bg)") +
+  theme_minimal() + 
+  theme(legend.position = "none",
+        strip.text.y=element_text(angle=0))
+
+pdist2
+
+```
+
+
+# Age dependent means and seroprevalence
+
+## Function for a simultaneous CI around a spline curve
+```{r simultaneous CI}
+#----------------------------------
+# simulataneous CIs for GAMs
+# estimated by resampling the 
+# Baysian posterior estimates of
+# the variance-covariance matrix
+# assuming that it is multivariate normal
+# the function below also estimates 
+# the unconditional variance-covariance
+# matrix, Vb=vcov(x,unconditional=TRUE), 
+# which allows for undertainty in the actual
+# estimated mean as well 
+# (Marra & Wood 2012 Scandinavian Journal of Statistics, 
+#  Vol. 39: 53–74, 2012, doi: 10.1111/j.1467-9469.2011.00760.x )
+# simultaneous CIs provide much better coverage than pointwise CIs
+# see: http://www.fromthebottomoftheheap.net/2016/12/15/simultaneous-interval-revisited/
+#----------------------------------
+
+gamCI <- function(m,newdata,nreps=10000) {
+  require(mgcv)
+  require(dplyr)
+  Vb <- vcov(m,unconditional = TRUE)
+  pred <- predict(m, newdata, se.fit = TRUE)
+  fit <- pred$fit
+  se.fit <- pred$se.fit
+  BUdiff <- MASS::mvrnorm(n=nreps, mu = rep(0, nrow(Vb)), Sigma = Vb)
+  Cg <- predict(m, newdata, type = "lpmatrix")
+  simDev <- Cg %*% t(BUdiff)
+  absDev <- abs(sweep(simDev, 1, se.fit, FUN = "/"))
+  masd <- apply(absDev, 2L, max)
+  crit <- quantile(masd, prob = 0.95, type = 8)
+  pred <- data.frame(newdata,fit=pred$fit,se.fit=pred$se.fit)
+  pred <- mutate(pred,
+                 uprP = fit + (2 * se.fit),
+                 lwrP = fit - (2 * se.fit),
+                 uprS = fit + (crit * se.fit),
+                 lwrS = fit - (crit * se.fit)
+  )
+  return(pred)
+}
+
+```
+
+## Select smoothing parameters with CV
+```{r smoothing parameter selection by CV}
+#----------------------------------
+# prep data for spline fits
+#----------------------------------
+dl <- dl %>% 
+  ungroup() %>%
+  mutate(psuid=factor(psuid),
+         dummy=1)
+#----------------------------------
+# choose the smoothing parameter
+# for the splines, k, 
+# based on cross-validated MSE
+# pick smallest k where CV MSE is 
+# close to its minimum
+#----------------------------------
+library(SuperLearner)
+library(mgcv)
+source(here("R","SL.mgcv.R")) # mgcv wrapper for SuperLearner
+
+# k=4
+set.seed(123)
+sld <- filter(dl,antigen=="pfmsp19")
+cv_msp1 <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
+cv_msp1
+
+# k=4
+set.seed(123)
+sld <- filter(dl,antigen=="nie")
+cv_nie <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
+cv_nie
+
+# k=4
+set.seed(123)
+sld <- filter(dl,antigen=="t24")
+cv_t24 <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
+cv_t24
+```
+
+## Age dependent means
+```{r agecurves mfi}
+
+#----------------------------------
+# fit GAM with a spline for age
+# include a random effect for cluster
+# estimate simultaneous CIs around the curve
+# for the prediction data, set the dummy to 0 to 
+# zero out all of the random effects
+# see posts on Stack Exchange for explanation:
+# https://stats.stackexchange.com/questions/131106/predicting-with-random-effects-in-mgcv-gam/131116#131116
+# https://stats.stackexchange.com/questions/189384/predicting-mean-smooth-in-gam-with-smooth-by-random-factor-interaction
+#----------------------------------
+
+# Pf Malaria MSP-1
+fit_msp1 <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(psuid,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="pfmsp19"))
+newd <- dl %>% filter(antigen=="pfmsp19") %>% mutate(dummy=0)
+fit_msp1ci <- gamCI(m=fit_msp1,newdata=newd,nreps=10000)
+
+# Strongy NIE
+fit_nie <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(psuid,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="nie"))
+newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
+fit_nieci <- gamCI(m=fit_nie,newdata=newd,nreps=10000)
+
+# Taenia t24
+fit_t24 <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(psuid,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="t24"))
+newd <- dl %>% filter(antigen=="t24") %>% mutate(dummy=0)
+fit_t24ci <- gamCI(m=fit_t24,newdata=newd,nreps=10000)
+
+fit_mfi <- bind_rows(fit_msp1ci,fit_nieci,fit_t24ci)
+
+```
+
+```{r mean mfi by age plot}
+
+pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigen)) +
+  facet_grid(~antigen) +
+  geom_point(aes(x=age,y=logmfi),color="black",alpha=0.1,size=0.2)+
+  geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="black") +
+  geom_line(lwd=0.5,alpha=0.5) +
+  geom_smooth(method="loess",se=FALSE,lwd=0.5) +
+  scale_y_continuous(breaks=seq(0,4,by=1))+
+  labs(x="age, years",y="log10 Luminex Response (MFI-bg)") +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pagemfi
+
+
+```
+
+## Age dependent seroprevalence
+```{r agecurves seroprev}
+
+# Pf Malaria MSP-1
+fitp_msp1 <- mgcv::gam(seropos~s(age,bs="cr",k=11) + s(psuid,bs="re",by=dummy), family="binomial",
+                      data=filter(dl,antigen=="pfmsp19"))
+newd <- dl %>% filter(antigen=="pfmsp19") %>% mutate(dummy=0)
+fitp_msp1ci <- gamCI(m=fitp_msp1,newdata=newd,nreps=10000)
+
+# Strongy NIE
+fitp_nie <- mgcv::gam(seropos~s(age,bs="cr",k=7) + s(psuid,bs="re",by=dummy), family="binomial", 
+                      data=filter(dl,antigen=="nie"))
+newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
+fitp_nieci <- gamCI(m=fitp_nie,newdata=newd,nreps=10000)
+
+# Taenia t24
+fitp_t24 <- mgcv::gam(seropos~s(age,bs="cr",k=9) + s(psuid,bs="re",by=dummy), family="binomial", 
+                      data=filter(dl,antigen=="t24"))
+newd <- dl %>% filter(antigen=="t24") %>% mutate(dummy=0)
+fitp_t24ci <- gamCI(m=fitp_t24,newdata=newd,nreps=10000)
+
+fit_seroprev <- bind_rows(fitp_msp1ci,fitp_nieci,fitp_t24ci)
+
+# convert linear predictor to prevalance
+expitfn <- function(x) {
+  exp(x)/(1+exp(x))
+}
+fit_seroprev <- fit_seroprev %>%
+  mutate(fit = expitfn(fit),
+         uprP = expitfn(uprP),
+         lwrP = expitfn(lwrP),
+         uprS = expitfn(uprS),
+         lwrS = expitfn(lwrS),
+         )
+
+```
+
+```{r seroprev by age plot}
+
+pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigen)) +
+  facet_grid(~antigen) +
+  geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="grey50") +
+  geom_line(lwd=0.5,alpha=0.5) +
+  geom_smooth(method="loess",se=FALSE,lwd=0.5) +
+  scale_y_continuous(breaks=seq(0,0.8,by=0.1),labels=seq(0,80,by=10))+
+  labs(x="age, years",y="Seroprevalence (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pageprev
+
+
+```
+# Cluster level seroprevalence vs. means
+
+```{r cluster means}
+
+dlc <- dl %>%
+  group_by(psuid,antigen) %>%
+  mutate(posroc=ifelse(logmfi>roccut,1,0)) %>%
+  summarize(n=n(),
+            meanmfi=mean(logmfi),
+            prevroc=mean(posroc))
+
+dcorr <- dlc %>%
+  ungroup() %>%
+  group_by(antigen) %>%
+  mutate(corxy=cor(meanmfi,prevroc,method="pearson",use="pairwise.complete.obs") ) %>%
+  slice(1)
+
+pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
+  facet_grid(~antigen) +
+  geom_point(aes(y=prevroc),alpha=0.7) +
+  geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dcorr,
+            aes(x=3.5,y=0.1,label=paste("r ==",sprintf("%1.2f",corxy)) ),
+            parse=TRUE,col="grey30") +
+  scale_y_continuous(breaks=seq(0,1,by=0.1),labels=seq(0,100,by=10))+
+  coord_cartesian(ylim=c(0,1),xlim=c(1,4.5)) +
+  labs(x="cluster mean log10 MFI",y="cluster seroprevalence (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pmfivprev
+
+```
