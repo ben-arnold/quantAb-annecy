@@ -44,6 +44,12 @@ dl <- d %>%
 dl <- dl %>%
   mutate(logmfi = ifelse(mfi>0,log10(mfi),log10(1)))
 
+# create formatted antigen labels
+dl <- dl %>%
+  mutate(antigenf=factor(antigen,levels=c("ashb","nie","sea"),
+                         labels=c("Ascaris spp. AsHb","S. stercoralis NIE","S. mansoni SEA")))
+
+
 # add ROC and mixture model-based cutoffs
 dl$roccut <- NA
 dl$mixcut <- NA
@@ -64,17 +70,21 @@ dl <- dl %>%
 
 ```{r density plot ashb}
 ggplotcols <- scales::hue_pal()(3)
-pdistashb <- ggplot(data=filter(dl,antigen=="ashb"),aes(x=logmfi,fill=antigen)) +
+pdistall <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
+  facet_grid(.~antigenf) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
-  scale_fill_manual(values=ggplotcols[1])+
+  # scale_fill_manual(values=ggplotcols[1])+
   scale_x_continuous(breaks=0:4,labels=c(expression(10^0),expression(10^1),expression(10^2),expression(10^3),expression(10^4))) +
-  labs(x="luminex response (MFI-bg)", title="Ascaris spp. AsHb") +
+  labs(x="luminex response (MFI-bg)") +
   theme_minimal() + 
   theme(legend.position = "none",
         strip.text.y=element_text(angle=0))
 
-pdistashb
+pdistall
+
+# save png file for presentation
+ggsave(filename=here("output","coastal-ab-dists.png"),plot=pdistall,device="png",width=6,height=2.5)
 
 ```
 
@@ -291,7 +301,7 @@ pageprev
 ```{r cluster means}
 
 dlc <- dl %>%
-  group_by(community,antigen) %>%
+  group_by(community,antigenf) %>%
   mutate(posmix=ifelse(logmfi>mixcut,1,0),
          posroc=ifelse(logmfi>roccut,1,0)) %>%
   summarize(n=n(),
@@ -301,13 +311,13 @@ dlc <- dl %>%
 
 dcorr <- dlc %>%
   ungroup() %>%
-  group_by(antigen) %>%
+  group_by(antigenf) %>%
   mutate(corroc=cor(meanmfi,prevroc,method="pearson"),
          cormix=cor(meanmfi,prevmix,method="pearson")) %>%
   slice(1)
 
-pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
-  facet_grid(~antigen) +
+pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_point(aes(y=prevroc),alpha=0.7) +
   geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
@@ -320,9 +330,12 @@ pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
   theme(legend.position="none")
 pmfivprev
 
+# save png file for presentation
+ggsave(filename=here("output","coastal-mfi-v-seroprev.png"),plot=pmfivprev,device="png",width=6,height=2.5)
+
 # include estimates using mixture model based cutoff
-pmfivprev2 <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
-  facet_grid(~antigen) +
+pmfivprev2 <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_point(aes(y=prevroc),alpha=0.7) +
   geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
