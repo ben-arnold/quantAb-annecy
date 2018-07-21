@@ -73,10 +73,21 @@ dl$roccut[dl$antigen %in% "ashb"] <- log10(418)
 dl$roccut[dl$antigen %in% "nie"] <- log10(659)
 dl$roccut[dl$antigen %in% "vsp5"] <- log10(281)
 
-
 # define seroprevalence based on ROC cutoffs
 dl <- dl %>%
   mutate(seropos = ifelse(logmfi>roccut,1,0))
+
+
+# create formatted antigen labels
+dl <- dl %>%
+  mutate(antigenf=factor(antigen,levels=c("ashb","nie","sea","msp1","vsp5"),
+                         labels=c("Ascaris spp. AsHb",
+                                  "S. stercoralis NIE",
+                                  "S. mansoni SEA",
+                                  "P. falciparum MSP-1",
+                                  "Giardia spp. VSP-5")))
+
+
 ```
 
 
@@ -84,10 +95,10 @@ dl <- dl %>%
 
 ```{r density plot by age}
 
-table(dl$agecat,dl$antigen)
+table(dl$agecat,dl$antigenf)
 
 pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
-  facet_grid(agecat~antigen) +
+  facet_grid(agecat~antigenf) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
   scale_fill_manual(values=pcols)+
@@ -98,6 +109,23 @@ pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
         strip.text.y=element_text(angle=0))
 
 pdist
+
+
+pdist2 <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
+  facet_grid(.~antigenf) +
+  geom_density(alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = roccut),lty=1) +
+  scale_fill_manual(values=pcols)+
+  # geom_vline(aes(xintercept = mixcut),lty=2) +
+  labs(x="log10 luminex response (MFI-bg)") +
+  theme_minimal() + 
+  theme(legend.position = "none",
+        strip.text.y=element_text(angle=0))
+
+pdist2
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-ab-dists.png"),plot=pdist2,device="png",width=8,height=2.5)
 
 ```
 
@@ -334,7 +362,7 @@ pageprev
 ```{r cluster means}
 
 dlc <- dl %>%
-  group_by(community,antigen) %>%
+  group_by(community,antigenf) %>%
   mutate(posroc=ifelse(logmfi>roccut,1,0)) %>%
   summarize(n=n(),
             meanmfi=mean(logmfi),
@@ -343,13 +371,13 @@ dlc <- dl %>%
 # estimate pearson correlation
 dcorr <- dlc %>%
   ungroup() %>%
-  group_by(antigen) %>%
+  group_by(antigenf) %>%
   mutate(corroc=cor(meanmfi,prevroc,method="pearson")) %>%
   slice(1)
 
 # estimate regression slope
-foreach(ai=levels(dlc$antigen)) %do% {
-  di <- dlc %>% filter(antigen==ai)
+foreach(ai=levels(dlc$antigenf)) %do% {
+  di <- dlc %>% filter(antigenf==ai)
   fit <- lm(prevroc~meanmfi,data=di)
   summary(fit)
 }
@@ -357,20 +385,24 @@ foreach(ai=levels(dlc$antigen)) %do% {
 
 
 ```{r prev vs mfi figure}
-pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
-  facet_grid(~antigen) +
+pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_point(aes(y=prevroc),alpha=0.7) +
   geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
             aes(x=2.5,y=0.95,label=paste("r ==",sprintf("%1.2f",corroc)) ),
             parse=TRUE,col="grey30") +
-  scale_y_continuous(breaks=seq(0,1,by=0.1),labels=seq(0,100,by=10))+
+  scale_y_continuous(breaks=seq(0,1,by=0.2),labels=seq(0,100,by=20))+
   scale_color_manual(values=pcols)+
   coord_cartesian(ylim=c(0,1),xlim=c(1,4.5)) +
   labs(x="community mean log10 MFI",y="community seroprevalence (%)") +
   theme_minimal() +
   theme(legend.position="none")
 pmfivprev
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-mfi-v-seroprev.png"),plot=pmfivprev,device="png",width=10,height=2.5)
+
 
 ```
 
@@ -385,17 +417,17 @@ Moroever, this model is also equivalent to a catalytic, SIR model with a single,
 
 ```{r  foi estimation for msp and sea}
 
-foi_ests <- foreach(ai=c("sea","msp1"),.combine=rbind) %:%
+foi_ests <- foreach(ai=c("S. mansoni SEA","P. falciparum MSP-1"),.combine=rbind) %:%
   foreach(comi=levels(dl$community),.combine=rbind) %do% {
   
-  di <- dl %>% filter(antigen==ai & community==comi)
+  di <- dl %>% filter(antigenf==ai & community==comi)
   gfit <- glm(seropos~1,offset=log(age),data=di,family=binomial(link="cloglog"))
   gsum <- summary(gfit)
   lambda <- as.numeric(exp(gfit$coefficients))
   log_lambda_se  <- sqrt(gsum$cov.unscaled)
   lambda_lb <- as.numeric(exp(gfit$coefficients - 1.96*log_lambda_se))
   lambda_ub <- as.numeric(exp(gfit$coefficients + 1.96*log_lambda_se))
-  res <- data.frame(community=comi,antigen=ai,lambda,lambda_lb,lambda_ub)
+  res <- data.frame(community=comi,antigenf=ai,lambda,lambda_lb,lambda_ub)
   return(res)
 }
 
@@ -408,15 +440,15 @@ foi_ests
 ```{r merge foi estimates}
 # merge FOI estimates to the cluster-level means
 d_foi <- dlc %>%
-  filter(antigen=="sea"|antigen=="msp1") %>%
-  left_join(foi_ests,by=c("community","antigen")) %>%
-  mutate(antigen=factor(antigen,levels=c("ashb","sea","msp1")))
+  filter(antigenf=="S. mansoni SEA"|antigenf=="P. falciparum MSP-1") %>%
+  left_join(foi_ests,by=c("community","antigenf")) %>%
+  mutate(antigenf=factor(antigenf,levels=c("S. mansoni SEA","P. falciparum MSP-1")))
 
 
 # estimate spearman correlation
 dfoicorr <- d_foi %>%
   ungroup() %>%
-  group_by(antigen) %>%
+  group_by(antigenf) %>%
   mutate(cormfi=cor(meanmfi,lambda,method="spearman"),
          corprev=cor(prevroc,lambda,method="spearman")) %>%
   slice(1)
@@ -425,8 +457,8 @@ dfoicorr <- d_foi %>%
 
 Figure of results
 ```{r foi vs mfi figure}
-pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigen)) +
-  facet_grid(~antigen)+
+pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
+  facet_grid(~antigenf)+
   geom_point(,alpha=0.7) +
   # geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_smooth(method="loess",color="gray40",lwd=0.5,se=FALSE) +
@@ -440,10 +472,14 @@ pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigen)) +
   theme_minimal() +
   theme(legend.position="none")
 pfoivmfi
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-mfi-v-foi.png"),plot=pfoivmfi,device="png",width=5,height=3)
+
 ```
 ```{r foi vs prev figure}
-pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigen)) +
-  facet_grid(~antigen)+
+pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigenf)) +
+  facet_grid(~antigenf)+
   geom_point(alpha=0.7) +
   # geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_smooth(method="loess",color="gray40",lwd=0.5,se=FALSE) +
