@@ -69,6 +69,12 @@ dl$roccut[dl$antigen %in% "pfmsp19"] <- log10(343)
 dl$roccut[dl$antigen %in% "pvmsp19"] <- log10(196)
 dl$roccut[dl$antigen %in% "ttmb"] <- log10(100)
 
+# create formatted antigen labels
+dl <- dl %>%
+  mutate(antigenf=factor(antigen,levels=c("nie","t24","pfmsp19","pvmsp19","ttmb"),
+                         labels=c("S. stercoralis NIE","T. solium T24","P. falciparum MSP-1","P. vivax MSP-1","Tetanus toxoid")))
+
+
 
 # define seroprevalence based on ROC cutoffs
 dl <- dl %>%
@@ -83,7 +89,7 @@ dl <- dl %>%
 table(dl$agecat,dl$antigen)
 
 # stratified by age
-pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
+pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
   facet_grid(agecat~antigen) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
@@ -98,8 +104,8 @@ pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
 pdist
 
 # unstratified
-pdist2 <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
-  facet_grid(~antigen) +
+pdist2 <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
+  facet_grid(~antigenf) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
   scale_fill_manual(values=pcols)+
@@ -110,6 +116,10 @@ pdist2 <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
         strip.text.y=element_text(angle=0))
 
 pdist2
+
+# save png file for presentation
+ggsave(filename=here("output","cambodia-ab-dists.png"),plot=pdist2,device="png",width=8,height=2.5)
+
 
 ```
 
@@ -263,8 +273,8 @@ fit_mfi <- bind_rows(fit_nieci,fit_t24ci,fit_pfmsp1ci,fit_pvmsp1ci,fit_ttmbci)
 
 ```{r mean mfi by age plot}
 
-pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigen)) +
-  facet_grid(~antigen) +
+pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_point(aes(x=age,y=logmfi),alpha=0.2,size=0.2)+
   geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="black") +
   geom_line(lwd=0.5,alpha=0.5,color="black") +
@@ -333,8 +343,8 @@ fit_seroprev <- fit_seroprev %>%
 
 ```{r seroprev by age plot}
 
-pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigen)) +
-  facet_grid(~antigen) +
+pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="grey50") +
   geom_line(lwd=0.5,alpha=0.5) +
   geom_smooth(method="loess",se=FALSE,lwd=0.5) +
@@ -353,7 +363,7 @@ pageprev
 ```{r cluster means}
 
 dlc <- dl %>%
-  group_by(psuid,antigen) %>%
+  group_by(psuid,antigenf) %>%
   mutate(posroc=ifelse(logmfi>roccut,1,0)) %>%
   summarize(n=n(),
             meanmfi=mean(logmfi),
@@ -361,12 +371,12 @@ dlc <- dl %>%
 
 dcorr <- dlc %>%
   ungroup() %>%
-  group_by(antigen) %>%
+  group_by(antigenf) %>%
   mutate(corxy=cor(meanmfi,prevroc,method="pearson") ) %>%
   slice(1)
 
-pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
-  facet_grid(~antigen) +
+pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_point(aes(y=prevroc),alpha=0.7) +
   geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
@@ -379,5 +389,10 @@ pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigen)) +
   theme_minimal() +
   theme(legend.position="none")
 pmfivprev
+
+
+# save png file for presentation
+ggsave(filename=here("output","cambodia-mfi-v-seroprev.png"),plot=pmfivprev,device="png",width=8,height=2.5)
+
 
 ```
