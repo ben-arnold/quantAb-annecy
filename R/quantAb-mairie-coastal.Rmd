@@ -46,8 +46,8 @@ dl <- dl %>%
 
 # create formatted antigen labels
 dl <- dl %>%
-  mutate(antigenf=factor(antigen,levels=c("ashb","nie","sea"),
-                         labels=c("Ascaris spp. AsHb","S. stercoralis NIE","S. mansoni SEA")))
+  mutate(antigenf=factor(antigen,levels=c("ashb","sea","nie"),
+                         labels=c("Ascaris spp. AsHb","S. mansoni SEA","S. stercoralis NIE")))
 
 
 # add ROC and mixture model-based cutoffs
@@ -92,8 +92,8 @@ ggsave(filename=here("output","coastal-ab-dists.png"),plot=pdistall,device="png"
 
 table(dl$agecat,dl$antigen)
 
-pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
-  facet_grid(agecat~antigen) +
+pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
+  facet_grid(agecat~antigenf) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
   # geom_vline(aes(xintercept = mixcut),lty=2) +
@@ -209,11 +209,6 @@ fit_ashb <- mgcv::gam(logmfi~s(age,bs="cr",k=11) + s(community,bs="re",by=dummy)
 newd <- dl %>% filter(antigen=="ashb") %>% mutate(dummy=0)
 fit_ashbci <- gamCI(m=fit_ashb,newdata=newd,nreps=10000)
 
-# Strongy NIE
-fit_nie <- mgcv::gam(logmfi~s(age,bs="cr",k=7) + s(community,bs="re",by=dummy), 
-                      data=filter(dl,antigen=="nie"))
-newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
-fit_nieci <- gamCI(m=fit_nie,newdata=newd,nreps=10000)
 
 # Schisto SEA
 fit_sea <- mgcv::gam(logmfi~s(age,bs="cr",k=9) + s(community,bs="re",by=dummy), 
@@ -221,7 +216,13 @@ fit_sea <- mgcv::gam(logmfi~s(age,bs="cr",k=9) + s(community,bs="re",by=dummy),
 newd <- dl %>% filter(antigen=="sea") %>% mutate(dummy=0)
 fit_seaci <- gamCI(m=fit_sea,newdata=newd,nreps=10000)
 
-fit_mfi <- bind_rows(fit_ashbci,fit_nieci,fit_seaci)
+# Strongy NIE
+fit_nie <- mgcv::gam(logmfi~s(age,bs="cr",k=7) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="nie"))
+newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
+fit_nieci <- gamCI(m=fit_nie,newdata=newd,nreps=10000)
+
+fit_mfi <- bind_rows(fit_ashbci,fit_seaci,fit_nieci)
 
 ```
 
@@ -252,19 +253,19 @@ fitp_ashb <- mgcv::gam(seropos~s(age,bs="cr",k=11) + s(community,bs="re",by=dumm
 newd <- dl %>% filter(antigen=="ashb") %>% mutate(dummy=0)
 fitp_ashbci <- gamCI(m=fitp_ashb,newdata=newd,nreps=10000)
 
-# Strongy NIE
-fitp_nie <- mgcv::gam(seropos~s(age,bs="cr",k=7) + s(community,bs="re",by=dummy), family="binomial", 
-                      data=filter(dl,antigen=="nie"))
-newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
-fitp_nieci <- gamCI(m=fitp_nie,newdata=newd,nreps=10000)
-
 # Schisto SEA
 fitp_sea <- mgcv::gam(seropos~s(age,bs="cr",k=9) + s(community,bs="re",by=dummy), family="binomial", 
                       data=filter(dl,antigen=="sea"))
 newd <- dl %>% filter(antigen=="sea") %>% mutate(dummy=0)
 fitp_seaci <- gamCI(m=fitp_sea,newdata=newd,nreps=10000)
 
-fit_seroprev <- bind_rows(fitp_ashbci,fitp_nieci,fitp_seaci)
+# Strongy NIE
+fitp_nie <- mgcv::gam(seropos~s(age,bs="cr",k=7) + s(community,bs="re",by=dummy), family="binomial", 
+                      data=filter(dl,antigen=="nie"))
+newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
+fitp_nieci <- gamCI(m=fitp_nie,newdata=newd,nreps=10000)
+
+fit_seroprev <- bind_rows(fitp_ashbci,fitp_seaci,fitp_nieci)
 
 # convert linear predictor to prevalance
 expitfn <- function(x) {
@@ -366,20 +367,20 @@ Moroever, this model is also equivalent to a catalytic, SIR model with a single,
 
 ```{r  foi estimation for msp and sea}
 
-foi_ests <- foreach(ai=c("ashb","nie","sea"),.combine=rbind) %:%
+foi_ests <- foreach(ai=levels(dl$antigenf),.combine=rbind) %:%
   foreach(comi=levels(dl$community),.combine=rbind) %do% {
   
-  di <- dl %>% filter(antigen==ai & community==comi)
+  di <- dl %>% filter(antigenf==ai & community==comi)
   gfit <- glm(seropos~1,offset=log(age),data=di,family=binomial(link="cloglog"))
   gsum <- summary(gfit)
   lambda <- as.numeric(exp(gfit$coefficients))
   log_lambda_se  <- sqrt(gsum$cov.unscaled)
   lambda_lb <- as.numeric(exp(gfit$coefficients - 1.96*log_lambda_se))
   lambda_ub <- as.numeric(exp(gfit$coefficients + 1.96*log_lambda_se))
-  res <- data.frame(community=comi,antigen=ai,lambda,lambda_lb,lambda_ub)
+  res <- data.frame(community=comi,antigenf=ai,lambda,lambda_lb,lambda_ub)
   return(res)
 }
-
+foi_ests <- foi_ests %>% mutate(antigenf=factor(antigenf,levels=levels(dl$antigenf)))
 foi_ests
 
 ```
@@ -387,17 +388,17 @@ foi_ests
 ```{r merge foi estimates}
 # merge FOI estimates to the cluster-level means
 d_foi <- dlc %>%
-  left_join(foi_ests,by=c("community","antigen")) %>%
-  mutate(antigen=factor(antigen,levels=c("ashb","nie","sea")))
+  left_join(foi_ests,by=c("community","antigenf")) %>%
+  mutate(antigenf=factor(antigenf,levels=levels(dl$antigenf)))
 
 
 # estimate spearman correlation
 dfoicorr <- d_foi %>%
   ungroup() %>%
-  group_by(antigen) %>%
+  group_by(antigenf) %>%
   mutate(cormfi=cor(meanmfi,lambda,method="pearson"),
          corprev=cor(prevroc,lambda,method="pearson")) %>%
-  select(antigen,cormfi,corprev) %>%
+  select(antigenf,cormfi,corprev) %>%
   slice(1)
 
 ```
@@ -405,8 +406,8 @@ dfoicorr <- d_foi %>%
 
 Figure of results
 ```{r foi vs mfi figure}
-pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigen)) +
-  facet_grid(~antigen)+
+pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
+  facet_grid(~antigenf)+
   geom_point(,alpha=0.7) +
   geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dfoicorr,
@@ -420,8 +421,8 @@ pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigen)) +
 pfoivmfi
 ```
 ```{r foi vs prev figure}
-pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigen)) +
-  facet_grid(~antigen)+
+pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigenf)) +
+  facet_grid(~antigenf)+
   geom_point(alpha=0.7) +
   geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dfoicorr,
