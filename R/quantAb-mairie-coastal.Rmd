@@ -228,18 +228,23 @@ fit_mfi <- bind_rows(fit_ashbci,fit_seaci,fit_nieci)
 
 ```{r mean mfi by age plot}
 
-pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigen)) +
-  facet_grid(~antigen) +
+pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_point(aes(x=age,y=logmfi),alpha=0.1,size=0.2)+
   geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="black") +
   geom_line(lwd=0.5,alpha=0.5,color="black") +
   geom_smooth(method="loess",se=FALSE,lwd=0.5,color="black") +
   scale_y_continuous(breaks=seq(0,4,by=1))+
+  coord_cartesian(ylim=c(1,4))+
   labs(x="age, years",y="log10 Luminex Response (MFI-bg)") +
   theme_minimal() +
   theme(legend.position="none")
 
 pagemfi
+
+# save png file for presentation
+ggsave(filename=here("output","coastal-age-means.png"),plot=pagemfi,device="png",width=6,height=2.5)
+
 
 
 ```
@@ -283,8 +288,8 @@ fit_seroprev <- fit_seroprev %>%
 
 ```{r seroprev by age plot}
 
-pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigen)) +
-  facet_grid(~antigen) +
+pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigenf)) +
+  facet_grid(~antigenf) +
   geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="grey50") +
   geom_line(lwd=0.5,alpha=0.5) +
   geom_smooth(method="loess",se=FALSE,lwd=0.5) +
@@ -294,6 +299,10 @@ pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigen)) +
   theme(legend.position="none")
 
 pageprev
+
+# save png file for presentation
+ggsave(filename=here("output","coastal-age-seroprev.png"),plot=pageprev,device="png",width=6,height=2.5)
+
 
 
 ```
