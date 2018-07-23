@@ -146,7 +146,7 @@ pdist3 <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
 pdist3
 
 # save png file for presentation
-ggsave(filename=here("output","mbita-ab-dists.png"),plot=pdist3,device="png",width=8,height=2.5)
+ggsave(filename=here("output","mbita-ab-dists.png"),plot=pdist3,device="png",width=8,height=2)
 
 ```
 
@@ -423,7 +423,8 @@ Moroever, this model is also equivalent to a catalytic, SIR model with a single,
 
 ```{r  foi estimation for msp and sea}
 
-foi_ests <- foreach(ai=c("S. mansoni SEA","P. falciparum MSP-1"),.combine=rbind) %:%
+# foi_ests <- foreach(ai=c("S. mansoni SEA","P. falciparum MSP-1"),.combine=rbind) %:%
+foi_ests <- foreach(ai=levels(dl$antigenf),.combine=rbind) %:%
   foreach(comi=levels(dl$community),.combine=rbind) %do% {
   
   di <- dl %>% filter(antigenf==ai & community==comi)
@@ -446,9 +447,9 @@ foi_ests
 ```{r merge foi estimates}
 # merge FOI estimates to the cluster-level means
 d_foi <- dlc %>%
-  filter(antigenf=="S. mansoni SEA"|antigenf=="P. falciparum MSP-1") %>%
-  left_join(foi_ests,by=c("community","antigenf")) %>%
-  mutate(antigenf=factor(antigenf,levels=c("S. mansoni SEA","P. falciparum MSP-1")))
+  # filter(antigenf=="S. mansoni SEA"|antigenf=="P. falciparum MSP-1") %>%
+  left_join(foi_ests,by=c("community","antigenf"))# %>%
+  # mutate(antigenf=factor(antigenf,levels=c("S. mansoni SEA","P. falciparum MSP-1")))
 
 
 # estimate spearman correlation
@@ -472,15 +473,15 @@ pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
             aes(x=2.5,y=0.6,label=paste("rho ==",sprintf("%1.2f",cormfi)) ),
             parse=TRUE,col="grey30") +
   scale_x_continuous(breaks=2:4)+
-  scale_color_manual(values=pcols[c(2,3)])+
-  coord_cartesian(xlim=c(2,4.5),ylim=c(0,0.7)) +
+  scale_color_manual(values=pcols)+
+  coord_cartesian(xlim=c(1.5,4),ylim=c(0,0.7)) +
   labs(x="community mean log10 MFI",y=expression(paste("community seroconversion rate (",lambda,")"))) +
   theme_minimal() +
   theme(legend.position="none")
 pfoivmfi
 
 # save png file for presentation
-ggsave(filename=here("output","mbita-mfi-v-foi.png"),plot=pfoivmfi,device="png",width=5,height=3)
+ggsave(filename=here("output","mbita-mfi-v-foi.png"),plot=pfoivmfi,device="png",width=8,height=2.5)
 
 ```
 ```{r foi vs prev figure}
@@ -493,14 +494,15 @@ pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigenf)) +
             aes(x=0.2,y=0.6,label=paste("rho ==",sprintf("%1.2f",corprev)) ),
             parse=TRUE,col="grey30") +
   scale_x_continuous(breaks=seq(0,1,by=0.2),labels=seq(0,100,by=20))+
-  scale_color_manual(values=pcols[c(2,3)])+
+  scale_color_manual(values=pcols)+
   coord_cartesian(xlim=c(0,1),ylim=c(0,0.7)) +
   labs(x="community seroprevalence (%)",y=expression(paste("community seroconversion rate (",lambda,")"))) +
   theme_minimal() +
   theme(legend.position="none")
 pfoivprev
 
-
+# save png file for presentation
+ggsave(filename=here("output","mbita-prev-v-foi.png"),plot=pfoivprev,device="png",width=8,height=3)
 ```
 
 # Effect of smaller samples
