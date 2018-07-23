@@ -20,6 +20,23 @@ here()
 library(tidyverse)
 library(foreach)
 library(mgcv)
+
+
+# grab some colors for plotting
+ggplotcols <- scales::hue_pal()(3)
+# bright color blind palette:  https://personal.sron.nl/~pault/ 
+cblack <- "#000004FF"
+cblue <- "#3366AA"
+cteal <- "#11AA99"
+cgreen <- "#66AA55"
+cchartr <- "#CCCC55"
+cmagent <- "#992288"
+cred <- "#EE3333"
+corange <- "#EEA722"
+cyellow <- "#FFEE33"
+cgrey <- "#777777"
+
+pcols <- c(ggplotcols,cmagent,corange)
 ```
 
 # Load coastal Kenya measurements
@@ -36,7 +53,7 @@ d <- d %>%
 
 # reshape to long format
 dl <- d %>%
-  select(community,age,agecat,sea,nie,ashb) %>%
+  select(community,age,agecat,ashb,sea,nie,bm14,wb123) %>%
   gather(key=antigen,value=mfi,-community,-age,-agecat) %>%
   group_by(community,antigen) %>%
   arrange(community,antigen,age)
@@ -46,19 +63,23 @@ dl <- dl %>%
 
 # create formatted antigen labels
 dl <- dl %>%
-  mutate(antigenf=factor(antigen,levels=c("ashb","sea","nie"),
-                         labels=c("Ascaris spp. AsHb","S. mansoni SEA","S. stercoralis NIE")))
+  mutate(antigenf=factor(antigen,levels=c("ashb","sea","nie","bm14","wb123"),
+                         labels=c("Ascaris spp. AsHb","S. mansoni SEA","S. stercoralis NIE","W. bancrofti Bm14","W. bancrofti Wb123")))
 
 
 # add ROC and mixture model-based cutoffs
 dl$roccut <- NA
 dl$mixcut <- NA
+dl$roccut[dl$antigen %in% "ashb"] <- log10(386)
+dl$mixcut[dl$antigen %in% "ashb"] <- log10(780)
 dl$roccut[dl$antigen %in% "sea"] <- log10(965)
 dl$mixcut[dl$antigen %in% "sea"] <- log10(476)
 dl$roccut[dl$antigen %in% "nie"] <- log10(628)
 dl$mixcut[dl$antigen %in% "nie"] <- log10(645)
-dl$roccut[dl$antigen %in% "ashb"] <- log10(386)
-dl$mixcut[dl$antigen %in% "ashb"] <- log10(780)
+dl$roccut[dl$antigen %in% "bm14"] <- log10(444)
+dl$mixcut[dl$antigen %in% "bm14"] <- log10(214)
+dl$roccut[dl$antigen %in% "wb123"] <- log10(342)
+dl$mixcut[dl$antigen %in% "wb123"] <- log10(366)
 
 # define seroprevalence based on ROC cutoffs
 dl <- dl %>%
@@ -74,7 +95,7 @@ pdistall <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
   facet_grid(.~antigenf) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
-  # scale_fill_manual(values=ggplotcols[1])+
+  scale_fill_manual(values=pcols)+
   scale_x_continuous(breaks=0:4,labels=c(expression(10^0),expression(10^1),expression(10^2),expression(10^3),expression(10^4))) +
   labs(x="luminex response (MFI-bg)") +
   theme_minimal() + 
@@ -84,7 +105,7 @@ pdistall <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
 pdistall
 
 # save png file for presentation
-ggsave(filename=here("output","coastal-ab-dists.png"),plot=pdistall,device="png",width=6,height=2.5)
+ggsave(filename=here("output","coastal-ab-dists.png"),plot=pdistall,device="png",width=8,height=2.5)
 
 ```
 
@@ -97,6 +118,7 @@ pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
   geom_density(alpha=0.5,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
   # geom_vline(aes(xintercept = mixcut),lty=2) +
+  scale_fill_manual(values=pcols)+
   labs(x="log10 luminex response (MFI-bg)") +
   theme_minimal() + 
   theme(legend.position = "none",
@@ -176,17 +198,27 @@ set.seed(123)
 sld <- filter(dl,antigen=="ashb")
 cv_ashb <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
 cv_ashb
-# k=11
-set.seed(123)
-sld <- filter(dl,antigen=="nie")
-cv_nie <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
-cv_nie
 # k=7
 set.seed(123)
 sld <- filter(dl,antigen=="sea")
 cv_sea <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
 cv_sea
-# k=9
+# k=11
+set.seed(123)
+sld <- filter(dl,antigen=="nie")
+cv_nie <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
+cv_nie
+# k=6
+set.seed(123)
+sld <- filter(dl,antigen=="bm14")
+cv_bm14 <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
+cv_bm14
+# k=4
+set.seed(123)
+sld <- filter(dl,antigen=="wb123")
+cv_wb123 <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:20,sep=""))
+cv_wb123
+
 ```
 
 ## Age dependent means
@@ -222,7 +254,20 @@ fit_nie <- mgcv::gam(logmfi~s(age,bs="cr",k=7) + s(community,bs="re",by=dummy),
 newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
 fit_nieci <- gamCI(m=fit_nie,newdata=newd,nreps=10000)
 
-fit_mfi <- bind_rows(fit_ashbci,fit_seaci,fit_nieci)
+# LF Bm14
+fit_bm14 <- mgcv::gam(logmfi~s(age,bs="cr",k=6) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="bm14"))
+newd <- dl %>% filter(antigen=="bm14") %>% mutate(dummy=0)
+fit_bm14ci <- gamCI(m=fit_bm14,newdata=newd,nreps=10000)
+
+# LF Wb123
+fit_wb123 <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="wb123"))
+newd <- dl %>% filter(antigen=="wb123") %>% mutate(dummy=0)
+fit_wb123ci <- gamCI(m=fit_wb123,newdata=newd,nreps=10000)
+
+
+fit_mfi <- bind_rows(fit_ashbci,fit_seaci,fit_nieci,fit_bm14ci,fit_wb123ci)
 
 ```
 
@@ -234,6 +279,7 @@ pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigenf)) +
   geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="black") +
   geom_line(lwd=0.5,alpha=0.5,color="black") +
   geom_smooth(method="loess",se=FALSE,lwd=0.5,color="black") +
+  scale_color_manual(values=pcols)+
   scale_y_continuous(breaks=seq(0,4,by=1))+
   coord_cartesian(ylim=c(1,4))+
   labs(x="age, years",y="log10 Luminex Response (MFI-bg)") +
@@ -243,7 +289,7 @@ pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigenf)) +
 pagemfi
 
 # save png file for presentation
-ggsave(filename=here("output","coastal-age-means.png"),plot=pagemfi,device="png",width=6,height=2.5)
+ggsave(filename=here("output","coastal-age-means.png"),plot=pagemfi,device="png",width=8,height=2.5)
 
 
 
@@ -270,7 +316,19 @@ fitp_nie <- mgcv::gam(seropos~s(age,bs="cr",k=7) + s(community,bs="re",by=dummy)
 newd <- dl %>% filter(antigen=="nie") %>% mutate(dummy=0)
 fitp_nieci <- gamCI(m=fitp_nie,newdata=newd,nreps=10000)
 
-fit_seroprev <- bind_rows(fitp_ashbci,fitp_seaci,fitp_nieci)
+# LF Bm14
+fitp_bm14 <- mgcv::gam(seropos~s(age,bs="cr",k=6) + s(community,bs="re",by=dummy), family="binomial", 
+                      data=filter(dl,antigen=="bm14"))
+newd <- dl %>% filter(antigen=="bm14") %>% mutate(dummy=0)
+fitp_bm14ci <- gamCI(m=fitp_bm14,newdata=newd,nreps=10000)
+
+# LF Wb123
+fitp_wb123 <- mgcv::gam(seropos~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), family="binomial", 
+                      data=filter(dl,antigen=="wb123"))
+newd <- dl %>% filter(antigen=="wb123") %>% mutate(dummy=0)
+fitp_wb123ci <- gamCI(m=fitp_wb123,newdata=newd,nreps=10000)
+
+fit_seroprev <- bind_rows(fitp_ashbci,fitp_seaci,fitp_nieci,fitp_bm14ci,fitp_wb123ci)
 
 # convert linear predictor to prevalance
 expitfn <- function(x) {
@@ -294,6 +352,7 @@ pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigenf)) +
   geom_line(lwd=0.5,alpha=0.5) +
   geom_smooth(method="loess",se=FALSE,lwd=0.5) +
   scale_y_continuous(breaks=seq(0,0.8,by=0.1),labels=seq(0,80,by=10))+
+  scale_color_manual(values=pcols)+
   labs(x="age, years",y="Seroprevalence (%)") +
   theme_minimal() +
   theme(legend.position="none")
@@ -331,17 +390,19 @@ pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
   geom_point(aes(y=prevroc),alpha=0.7) +
   geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
-            aes(x=3,y=0.1,label=paste("r ==",sprintf("%1.2f",corroc)) ),
+            aes(x=2,y=0.8,label=paste("r ==",sprintf("%1.2f",corroc)) ),
             parse=TRUE,col="grey30",hjust=0) +
   scale_y_continuous(breaks=seq(0,0.8,by=0.1),labels=seq(0,80,by=10))+
-  coord_cartesian(ylim=c(0,0.8),xlim=c(2,3.75)) +
+  scale_x_continuous(breaks=1:3)+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(ylim=c(0,0.8),xlim=c(1.5,3.75)) +
   labs(x="community mean log10 MFI",y="community seroprevalence (%)") +
   theme_minimal() +
   theme(legend.position="none")
 pmfivprev
 
 # save png file for presentation
-ggsave(filename=here("output","coastal-mfi-v-seroprev.png"),plot=pmfivprev,device="png",width=6,height=2.5)
+ggsave(filename=here("output","coastal-mfi-v-seroprev.png"),plot=pmfivprev,device="png",width=9,height=2.5)
 
 # include estimates using mixture model based cutoff
 pmfivprev2 <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
@@ -349,17 +410,18 @@ pmfivprev2 <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
   geom_point(aes(y=prevroc),alpha=0.7) +
   geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
-            aes(x=2.5,y=0.1,label=paste("r_roc ==",sprintf("%1.2f",corroc)) ),
+            aes(x=2,y=0.8,label=paste("r_roc ==",sprintf("%1.2f",corroc)) ),
             parse=TRUE,col="grey30",hjust=0) +
   
   geom_point(aes(y=prevmix),shape=21) +
   geom_smooth(aes(y=prevmix),method="glm",color="gray40",lty=2,lwd=0.5,se=FALSE) +
   geom_text(data=dcorr,
-            aes(x=2.5,y=0.05,label=paste("r_mix ==",sprintf("%1.2f",cormix)) ),
+            aes(x=2,y=0.75,label=paste("r_mix ==",sprintf("%1.2f",cormix)) ),
             parse=TRUE,col="grey30",hjust=0) +
   
   scale_y_continuous(breaks=seq(0,0.8,by=0.1),labels=seq(0,80,by=10))+
-  coord_cartesian(ylim=c(0,0.8),xlim=c(2,3.75)) +
+  scale_color_manual(values=pcols)+
+  coord_cartesian(ylim=c(0,0.8),xlim=c(1.5,3.75)) +
   labs(x="community mean log10 MFI",y="community seroprevalence (%)") +
   theme_minimal() +
   theme(legend.position="none")
@@ -422,8 +484,9 @@ pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
   geom_text(data=dfoicorr,
             aes(x=3,y=0.05,label=paste("r ==",sprintf("%1.2f",cormfi)) ),
             parse=TRUE,col="grey30") +
-  scale_x_continuous(breaks=2:4)+
-  coord_cartesian(xlim=c(2,4),ylim=c(0,0.05)) +
+  scale_x_continuous(breaks=2:3)+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(xlim=c(1.5,3.75),ylim=c(0,0.05)) +
   labs(x="community mean log10 MFI",y=expression(paste("community seroconversion rate (",lambda,")"))) +
   theme_minimal() +
   theme(legend.position="none")
@@ -438,7 +501,7 @@ pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigenf)) +
             aes(x=0.5,y=0.05,label=paste("r ==",sprintf("%1.2f",corprev)) ),
             parse=TRUE,col="grey30") +
   scale_x_continuous(breaks=seq(0,1,by=0.2),labels=seq(0,100,by=20))+
-  # scale_color_manual(values=pcols[c(3,4)])+
+  scale_color_manual(values=pcols)+
   coord_cartesian(xlim=c(0,1),ylim=c(0,0.05)) +
   labs(x="community seroprevalence (%)",y=expression(paste("community seroconversion rate (",lambda,")"))) +
   theme_minimal() +
