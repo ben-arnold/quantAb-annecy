@@ -53,8 +53,8 @@ d <- d %>%
 
 # reshape to long format
 dl <- d %>%
-  select(community,age,agecat,ashb,sea,nie,bm14,wb123) %>%
-  gather(key=antigen,value=mfi,-community,-age,-agecat) %>%
+  select(community,id,ict,age,agecat,ashb,sea,nie,bm14,wb123) %>%
+  gather(key=antigen,value=mfi,-community,-id,-ict,-age,-agecat) %>%
   group_by(community,antigen) %>%
   arrange(community,antigen,age)
 
@@ -64,7 +64,7 @@ dl <- dl %>%
 # create formatted antigen labels
 dl <- dl %>%
   mutate(antigenf=factor(antigen,levels=c("ashb","sea","nie","bm14","wb123"),
-                         labels=c("Ascaris spp. AsHb","S. mansoni SEA","S. stercoralis NIE","W. bancrofti Bm14","W. bancrofti Wb123")))
+                         labels=c("Ascaris spp. AsHb","S. mansoni SEA","S. stercoralis NIE","LF Bm14","LF Wb123")))
 
 
 # add ROC and mixture model-based cutoffs
@@ -84,6 +84,14 @@ dl$mixcut[dl$antigen %in% "wb123"] <- log10(366)
 # define seroprevalence based on ROC cutoffs
 dl <- dl %>%
   mutate(seropos = ifelse(logmfi>roccut,1,0))
+
+# split off the ICT measurements, since they are so different
+dl_ict <- dl %>%
+  filter(antigen %in% c("bm14","wb123"))
+
+dl <- dl %>%
+  select(-ict)
+
 ```
 
 
@@ -115,7 +123,7 @@ table(dl$agecat,dl$antigen)
 
 pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
   facet_grid(agecat~antigenf) +
-  geom_density(alpha=0.5,color=NA) +
+  geom_density(alpha=0.75,color=NA) +
   geom_vline(aes(xintercept = roccut),lty=1) +
   # geom_vline(aes(xintercept = mixcut),lty=2) +
   scale_fill_manual(values=pcols)+
@@ -125,6 +133,9 @@ pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
         strip.text.y=element_text(angle=0))
 
 pdist
+
+# save png file for presentation
+ggsave(filename=here("output","coastal-ab-dists-age.png"),plot=pdist,device="png",width=8,height=6)
 
 ```
 
@@ -360,7 +371,7 @@ pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigenf)) +
 pageprev
 
 # save png file for presentation
-ggsave(filename=here("output","coastal-age-seroprev.png"),plot=pageprev,device="png",width=6,height=2.5)
+ggsave(filename=here("output","coastal-age-seroprev.png"),plot=pageprev,device="png",width=8,height=2.5)
 
 
 
@@ -427,9 +438,9 @@ pmfivprev2 <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
   theme(legend.position="none")
 pmfivprev2
 ```
+
 # Comparison with FOI
 
-## Constant rate model
 Estimate community-level FOI for P. falciparum S. mansoni based on the seroconversion rate (incidence among susceptibles). Assume a constant rate model (i.e., average over all ages).  If we assume a constant force of infection ($\lambda$), equivalent to assuming an exponential model, then it can be shown that a generalized linear model with a complementary log-log link fit with current status, age-prevalence data is equivalent to an exponential proportional hazards model (*Jewell and van der Laan 1995*). 
 
 $\log - \log(1-P(Y|A,W)) = \log \lambda + \log A + \beta W$
@@ -492,6 +503,7 @@ pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
   theme(legend.position="none")
 pfoivmfi
 ```
+
 ```{r foi vs prev figure}
 pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigenf)) +
   facet_grid(~antigenf)+
@@ -510,4 +522,73 @@ pfoivprev
 
 
 ```
+
+# Comparison with ICT
+For the LF antigens, compare community level mean MFI and seroprevalence with ICT prevalence.
+
+```{r lf compare with ict}
+d_ict <- dl_ict %>%
+  group_by(community,antigenf) %>%
+  summarize(n=n(),
+            meanmfi=mean(logmfi),
+            seroprev=mean(seropos),
+            ictprev=mean(ict,na.rm=TRUE))
+
+# estimate spearman correlation
+dictcorr <- d_ict %>%
+  ungroup() %>%
+  group_by(antigenf) %>%
+  mutate(cormfi=cor(meanmfi,ictprev,method="pearson"),
+         corprev=cor(seroprev,ictprev,method="pearson")) %>%
+  select(antigenf,cormfi,corprev) %>%
+  slice(1)
+
+```
+
+Figures of results
+```{r ict vs mfi figure}
+pictvmfi <- ggplot(data=d_ict,aes(x=ictprev,y=meanmfi,color=antigenf)) +
+  facet_grid(~antigenf)+
+  geom_point(,alpha=0.7) +
+  geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dictcorr,
+            aes(x=0,y=2.75,label=paste("r ==",sprintf("%1.2f",cormfi)) ),
+            parse=TRUE,col="grey30",hjust=0) +
+  scale_y_continuous(breaks=2:3)+
+  scale_x_continuous(breaks=seq(0,0.06,by=0.01),labels=seq(0,6,by=1))+
+  scale_color_manual(values=pcols[4:5])+
+  coord_cartesian(ylim=c(1.5,3),xlim=c(0,0.06)) +
+  labs(y="community mean log10 MFI",x="community ICT prevalence (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pictvmfi
+
+# save png file for presentation
+ggsave(filename=here("output","coastal-mfi-v-ict.png"),plot=pictvmfi,device="png",width=6,height=4)
+
+```
+
+```{r ict vs prev figure}
+pictvprev <- ggplot(data=d_ict,aes(x=ictprev,y=seroprev,color=antigenf)) +
+  facet_grid(~antigenf)+
+  geom_point(,alpha=0.7) +
+  geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dictcorr,
+            aes(x=0,y=0.45,label=paste("r ==",sprintf("%1.2f",corprev)) ),
+            parse=TRUE,col="grey30",hjust=0) +
+  scale_y_continuous(breaks=seq(0,0.5,by=0.1),labels=seq(0,50,by=10))+
+  scale_x_continuous(breaks=seq(0,0.06,by=0.01),labels=seq(0,6,by=1))+
+  scale_color_manual(values=pcols[4:5])+
+  coord_cartesian(ylim=c(0,0.5),xlim=c(0,0.06)) +
+  labs(y="community mean seroprevalence (%)",x="community ICT prevalence (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pictvprev
+
+# save png file for presentation
+ggsave(filename=here("output","coastal-seroprev-v-ict.png"),plot=pictvprev,device="png",width=6,height=4)
+
+
+```
+
 
