@@ -1,0 +1,754 @@
+---
+title: "Mbita Kenya Ab study"
+output:
+  html_notebook:
+    highlight: haddock
+    theme: default
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+---
+
+
+# Preamble
+```{r preamble}
+library(here)
+here()
+
+library(tidyverse)
+library(mgcv)
+library(gridExtra)
+
+# set up for parallel computing
+# configure for a laptop (use only 3 cores)
+library(foreach)
+library(doParallel)
+registerDoParallel(cores=3)
+
+# grab some colors for plotting
+ggplotcols <- scales::hue_pal()(3)
+# bright color blind palette:  https://personal.sron.nl/~pault/ 
+cblack <- "#000004FF"
+cblue <- "#3366AA"
+cteal <- "#11AA99"
+cgreen <- "#66AA55"
+cchartr <- "#CCCC55"
+cmagent <- "#992288"
+cred <- "#EE3333"
+corange <- "#EEA722"
+cyellow <- "#FFEE33"
+cgrey <- "#777777"
+
+pcols <- c(ggplotcols,corange)
+
+```
+
+# Load coastal Kenya measurements
+Load AsHb measurements and filter 
+
+```{r load data, warning=FALSE}
+d <- readRDS(here("data","mbita_psac.rds"))
+
+# create age strata
+d <- d %>%
+  select(year,community=vid,
+         pid,age=agey,
+         asc_epg,sm_epg,
+         ashb,sea,msp1,vsp5) %>%
+  mutate(agecat = cut(age,breaks=c(0,1,2,3,4,6),labels=c("<1 year","1 year","2 years","3 years","4 years")))
+
+# reshape KK data to long format
+# the eggs per gram (EPG) measures are grouped by "antigen" 
+# (a wrong label) just to make them easy to merge back to the antibody data
+dlkk <- d %>%
+  select(year,community,pid,asc_epg,sm_epg,) %>%
+  gather(key=antigen,value=epg,-year,-community,-pid) %>%
+  mutate(antigen = factor(antigen,levels=c("asc_epg","sm_epg"),labels=c("ashb","sea"))) %>%
+  group_by(year,community,antigen) %>%
+  arrange(year,community,antigen)
+
+# reshape antibody data to long format
+dl <- d %>%
+  select(year,community,pid,age,agecat,ashb,sea,msp1,vsp5) %>%
+  gather(key=antigen,value=mfi,-year,-community,-pid,-age,-agecat) %>%
+  mutate(antigen = factor(antigen,levels=c("ashb","sea","msp1","vsp5"))) %>%
+  group_by(year,community,antigen) %>%
+  arrange(year,community,antigen,age)
+
+dl <- dl %>%
+  mutate(logmfi = ifelse(mfi>0,log10(mfi),log10(1)))
+
+# add ROC-based cutoffs
+dl$roccut <- NA
+dl$roccut[dl$antigen %in% "ashb"] <- log10(418)
+dl$roccut[dl$antigen %in% "sea"] <- log10(965)
+dl$roccut[dl$antigen %in% "msp1"] <- log10(170)
+dl$roccut[dl$antigen %in% "vsp5"] <- log10(281)
+
+# define seroprevalence based on ROC cutoffs
+dl <- dl %>%
+  mutate(seropos = ifelse(logmfi>roccut,1,0))
+
+
+# create formatted antigen labels
+dl <- dl %>%
+  mutate(antigenf=factor(antigen,levels=c("ashb","sea","msp1","vsp5"),
+                         labels=c("Ascaris spp. AsHb",
+                                  "S. mansoni SEA",
+                                  "P. falciparum MSP-1",
+                                  "Giardia sp. VSP-5")))
+
+
+# merge in the KK measurements for Schisto and Ascaris
+dl <- left_join(dl,dlkk,by=c("year","community","pid","antigen"))
+
+
+```
+
+
+# Age stratified distributions
+
+```{r density plot by age}
+
+table(dl$agecat,dl$antigenf)
+
+pdist <- ggplot(data=dl,aes(x=logmfi,fill=antigen)) +
+  facet_grid(agecat~antigenf) +
+  geom_density(alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = roccut),lty=1) +
+  scale_fill_manual(values=pcols)+
+  # geom_vline(aes(xintercept = mixcut),lty=2) +
+  labs(x="log10 luminex response (MFI-bg)") +
+  theme_minimal() + 
+  theme(legend.position = "none",
+        strip.text.y=element_text(angle=0))
+
+pdist
+
+# limit to just SEA and Giardia for presentation
+dlp <- dl %>% filter(antigen %in% c("ashb","sea","vsp5") ) %>%
+  mutate(antigenf=factor(antigenf,levels=c("S. mansoni SEA","Giardia sp. VSP-5","Ascaris spp. AsHb")))
+pdist2 <- ggplot(data=dlp,aes(x=logmfi,fill=antigen)) +
+  facet_grid(agecat~antigenf) +
+  geom_density(alpha=0.75,color=NA) +
+  geom_vline(aes(xintercept = roccut),lty=1) +
+  scale_fill_manual(values=pcols[c(1,2,4)])+
+  # geom_vline(aes(xintercept = mixcut),lty=2) +
+  labs(x="log10 luminex response (MFI-bg)") +
+  theme_minimal() + 
+  theme(legend.position = "none",
+        strip.text.y=element_text(angle=0,size=14),
+        strip.text.x=element_text(size=14))
+
+pdist2
+# save png file for presentation
+ggsave(filename=here("output","mbita-ab-dists-ashb-sea-vsp.png"),plot=pdist2,device="png",width=8,height=7)
+
+
+
+pdist3 <- ggplot(data=dl,aes(x=logmfi,fill=antigenf)) +
+  facet_grid(.~antigenf) +
+  geom_density(alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = roccut),lty=1) +
+  scale_fill_manual(values=pcols)+
+  # geom_vline(aes(xintercept = mixcut),lty=2) +
+  labs(x="log10 luminex response (MFI-bg)") +
+  theme_minimal() + 
+  theme(legend.position = "none",
+        strip.text.y=element_text(angle=0))
+
+pdist3
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-ab-dists.png"),plot=pdist3,device="png",width=8,height=2)
+
+```
+
+
+# Age dependent means and seroprevalence
+
+## Function for a simultaneous CI around a spline curve
+```{r simultaneous CI}
+#----------------------------------
+# simulataneous CIs for GAMs
+# estimated by resampling the 
+# Baysian posterior estimates of
+# the variance-covariance matrix
+# assuming that it is multivariate normal
+# the function below also estimates 
+# the unconditional variance-covariance
+# matrix, Vb=vcov(x,unconditional=TRUE), 
+# which allows for undertainty in the actual
+# estimated mean as well 
+# (Marra & Wood 2012 Scandinavian Journal of Statistics, 
+#  Vol. 39: 53–74, 2012, doi: 10.1111/j.1467-9469.2011.00760.x )
+# simultaneous CIs provide much better coverage than pointwise CIs
+# see: http://www.fromthebottomoftheheap.net/2016/12/15/simultaneous-interval-revisited/
+#----------------------------------
+
+gamCI <- function(m,newdata,nreps=10000) {
+  require(mgcv)
+  require(dplyr)
+  Vb <- vcov(m,unconditional = TRUE)
+  pred <- predict(m, newdata, se.fit = TRUE)
+  fit <- pred$fit
+  se.fit <- pred$se.fit
+  BUdiff <- MASS::mvrnorm(n=nreps, mu = rep(0, nrow(Vb)), Sigma = Vb)
+  Cg <- predict(m, newdata, type = "lpmatrix")
+  simDev <- Cg %*% t(BUdiff)
+  absDev <- abs(sweep(simDev, 1, se.fit, FUN = "/"))
+  masd <- apply(absDev, 2L, max)
+  crit <- quantile(masd, prob = 0.95, type = 8)
+  pred <- data.frame(newdata,fit=pred$fit,se.fit=pred$se.fit)
+  pred <- mutate(pred,
+                 uprP = fit + (2 * se.fit),
+                 lwrP = fit - (2 * se.fit),
+                 uprS = fit + (crit * se.fit),
+                 lwrS = fit - (crit * se.fit)
+  )
+  return(pred)
+}
+
+```
+
+## Select smoothing parameters with CV
+```{r smoothing parameter selection by CV}
+#----------------------------------
+# prep data for spline fits
+#----------------------------------
+dl <- dl %>% 
+  ungroup() %>%
+  mutate(community=factor(community),
+         dummy=1)
+#----------------------------------
+# choose the smoothing parameter
+# for the splines, k, 
+# based on cross-validated MSE
+# pick smallest k where CV MSE is 
+# close to its minimum
+#----------------------------------
+# library(SuperLearner)
+# library(mgcv)
+# source(here("R","SL.mgcv.R")) # mgcv wrapper for SuperLearner
+# # k=4
+# set.seed(123)
+# sld <- filter(dl,antigen=="msp1")
+# cv_msp1 <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:10,sep=""))
+# cv_msp1
+# # k=4
+# set.seed(123)
+# sld <- filter(dl,antigen=="vsp5")
+# cv_vsp5 <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:10,sep=""))
+# cv_vsp5
+# # k=4
+# set.seed(123)
+# sld <- filter(dl,antigen=="ashb")
+# cv_ashb <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:10,sep=""))
+# cv_ashb
+# # k=4
+# set.seed(123)
+# sld <- filter(dl,antigen=="sea")
+# cv_sea <- SuperLearner(Y=sld$logmfi,X=select(sld,age), SL.library = paste("SL.mgcv.k",4:10,sep=""))
+# cv_sea
+```
+
+## Age dependent means
+```{r agecurves mfi}
+
+#----------------------------------
+# fit GAM with a spline for age
+# include a random effect for cluster
+# estimate simultaneous CIs around the curve
+# for the prediction data, set the dummy to 0 to 
+# zero out all of the random effects
+# see posts on Stack Exchange for explanation:
+# https://stats.stackexchange.com/questions/131106/predicting-with-random-effects-in-mgcv-gam/131116#131116
+# https://stats.stackexchange.com/questions/189384/predicting-mean-smooth-in-gam-with-smooth-by-random-factor-interaction
+#----------------------------------
+
+
+# Pf Malaria MSP1 
+fit_msp1 <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="msp1"))
+newd <- dl %>% filter(antigen=="msp1") %>% mutate(dummy=0)
+fit_msp1ci <- gamCI(m=fit_msp1,newdata=newd,nreps=10000)
+
+# Giardia VSP5
+fit_vsp5 <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="vsp5"))
+newd <- dl %>% filter(antigen=="vsp5") %>% mutate(dummy=0)
+fit_vsp5ci <- gamCI(m=fit_vsp5,newdata=newd,nreps=10000)
+
+# Ascaris AsHb
+fit_ashb <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="ashb"))
+newd <- dl %>% filter(antigen=="ashb") %>% mutate(dummy=0)
+fit_ashbci <- gamCI(m=fit_ashb,newdata=newd,nreps=10000)
+
+# Schisto SEA
+fit_sea <- mgcv::gam(logmfi~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="sea"))
+newd <- dl %>% filter(antigen=="sea") %>% mutate(dummy=0)
+fit_seaci <- gamCI(m=fit_sea,newdata=newd,nreps=10000)
+
+fit_mfi <- bind_rows(fit_msp1ci,fit_vsp5ci,fit_ashbci,fit_seaci)
+
+```
+
+```{r mean mfi by age plot}
+
+pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigenf)) +
+  facet_grid(~antigenf) +
+  geom_point(aes(x=age,y=logmfi),alpha=0.1,size=0.2)+
+  geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="black") +
+  geom_line(lwd=0.5,alpha=0.5,color="black") +
+  geom_smooth(method="loess",se=FALSE,lwd=0.5,color="black") +
+  scale_color_manual(values=pcols)+
+  scale_y_continuous(breaks=seq(0,4,by=1))+
+  labs(x="age, years",y="log10 Luminex Response (MFI-bg)") +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pagemfi
+
+
+```
+
+## Age dependent seroprevalence
+```{r agecurves seroprev}
+
+
+
+# Ascaris AsHb
+fitp_ashb <- mgcv::gam(seropos~s(age,bs="cr",k=11) + s(community,bs="re",by=dummy), family="binomial",
+                      data=filter(dl,antigen=="ashb"))
+newd <- dl %>% filter(antigen=="ashb") %>% mutate(dummy=0)
+fitp_ashbci <- gamCI(m=fitp_ashb,newdata=newd,nreps=10000)
+
+# Schisto SEA
+fitp_sea <- mgcv::gam(seropos~s(age,bs="cr",k=9) + s(community,bs="re",by=dummy), family="binomial", 
+                      data=filter(dl,antigen=="sea"))
+newd <- dl %>% filter(antigen=="sea") %>% mutate(dummy=0)
+fitp_seaci <- gamCI(m=fitp_sea,newdata=newd,nreps=10000)
+
+# Pf Malaria MSP1 
+fitp_msp1 <- mgcv::gam(seropos~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="msp1"))
+newd <- dl %>% filter(antigen=="msp1") %>% mutate(dummy=0)
+fitp_msp1ci <- gamCI(m=fitp_msp1,newdata=newd,nreps=10000)
+
+# Giardia VSP5
+fitp_vsp5 <- mgcv::gam(seropos~s(age,bs="cr",k=4) + s(community,bs="re",by=dummy), 
+                      data=filter(dl,antigen=="vsp5"))
+newd <- dl %>% filter(antigen=="vsp5") %>% mutate(dummy=0)
+fitp_vsp5ci <- gamCI(m=fitp_vsp5,newdata=newd,nreps=10000)
+
+
+fit_seroprev <- bind_rows(fitp_ashbci,fitp_seaci,fitp_msp1ci,fitp_vsp5ci)
+
+# convert linear predictor to prevalance
+expitfn <- function(x) {
+  exp(x)/(1+exp(x))
+}
+fit_seroprev <- fit_seroprev %>%
+  mutate(fit = expitfn(fit),
+         uprP = expitfn(uprP),
+         lwrP = expitfn(lwrP),
+         uprS = expitfn(uprS),
+         lwrS = expitfn(lwrS),
+         )
+
+```
+
+```{r seroprev by age plot}
+
+pageprev <- ggplot(data=fit_seroprev,aes(x=age,y=fit,color=antigenf)) +
+  facet_grid(~antigenf) +
+  geom_ribbon(aes(ymin=lwrS,ymax=uprS),alpha=0.2,color=NA,fill="grey50") +
+  geom_line(lwd=0.5,alpha=0.5) +
+  geom_smooth(method="loess",se=FALSE,lwd=0.5) +
+  scale_color_manual(values=pcols)+
+  scale_y_continuous(breaks=seq(0,0.8,by=0.1),labels=seq(0,80,by=10))+
+  labs(x="age, years",y="Seroprevalence (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pageprev
+
+
+```
+# Cluster level seroprevalence vs. means
+
+```{r cluster means}
+
+dlc <- dl %>%
+  group_by(community,antigenf) %>%
+  mutate(posroc=ifelse(logmfi>roccut,1,0)) %>%
+  summarize(n=n(),
+            meanmfi=mean(logmfi),
+            prevroc=mean(posroc))
+
+# estimate pearson correlation
+dcorr <- dlc %>%
+  ungroup() %>%
+  group_by(antigenf) %>%
+  mutate(corroc=cor(meanmfi,prevroc,method="pearson")) %>%
+  slice(1)
+
+# estimate regression slope
+foreach(ai=levels(dlc$antigenf)) %do% {
+  di <- dlc %>% filter(antigenf==ai)
+  fit <- lm(prevroc~meanmfi,data=di)
+  summary(fit)
+}
+```
+
+
+```{r prev vs mfi figure}
+pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
+  facet_grid(~antigenf) +
+  geom_point(aes(y=prevroc),alpha=0.7) +
+  geom_smooth(aes(y=prevroc),method="glm",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dcorr,
+            aes(x=2.5,y=0.95,label=paste("r ==",sprintf("%1.2f",corroc)) ),
+            parse=TRUE,col="grey30") +
+  scale_y_continuous(breaks=seq(0,1,by=0.2),labels=seq(0,100,by=20))+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(ylim=c(0,1),xlim=c(1,4.5)) +
+  labs(x="community mean log10 MFI",y="community seroprevalence (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pmfivprev
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-mfi-v-seroprev.png"),plot=pmfivprev,device="png",width=8,height=2.5)
+
+
+```
+
+# Comparison with FOI
+
+## Constant rate model
+Estimate community-level FOI for pathogens based on the seroconversion rate (incidence among susceptibles). Assume a constant rate model (i.e., average over all ages).  If we assume a constant force of infection ($\lambda$), equivalent to assuming an exponential model, then it can be shown that a generalized linear model with a complementary log-log link fit with current status, age-prevalence data is equivalent to an exponential proportional hazards model (*Jewell and van der Laan 1995*). 
+
+$\log - \log(1-P(Y|A,W)) = \log \lambda + \log A + \beta W$
+
+Moroever, this model is also equivalent to a catalytic, SIR model with a single, constant rate parameter (*Hens et al. 2010*; *Hens et al. 2012*).
+
+```{r  foi estimation for msp and sea}
+
+# foi_ests <- foreach(ai=c("S. mansoni SEA","P. falciparum MSP-1"),.combine=rbind) %:%
+foi_ests <- foreach(ai=levels(dl$antigenf),.combine=rbind) %:%
+  foreach(comi=levels(dl$community),.combine=rbind) %do% {
+  
+  di <- dl %>% filter(antigenf==ai & community==comi)
+  gfit <- glm(seropos~1,offset=log(age),data=di,family=binomial(link="cloglog"))
+  gsum <- summary(gfit)
+  lambda <- as.numeric(exp(gfit$coefficients))
+  log_lambda_se  <- sqrt(gsum$cov.unscaled)
+  lambda_lb <- as.numeric(exp(gfit$coefficients - 1.96*log_lambda_se))
+  lambda_ub <- as.numeric(exp(gfit$coefficients + 1.96*log_lambda_se))
+  res <- data.frame(community=comi,antigenf=ai,lambda,lambda_lb,lambda_ub)
+  return(res)
+}
+
+foi_ests
+
+```
+
+
+
+```{r merge foi estimates}
+# merge FOI estimates to the cluster-level means
+d_foi <- dlc %>%
+  # filter(antigenf=="S. mansoni SEA"|antigenf=="P. falciparum MSP-1") %>%
+  left_join(foi_ests,by=c("community","antigenf"))# %>%
+  # mutate(antigenf=factor(antigenf,levels=c("S. mansoni SEA","P. falciparum MSP-1")))
+
+
+# estimate spearman correlation
+dfoicorr <- d_foi %>%
+  ungroup() %>%
+  group_by(antigenf) %>%
+  mutate(cormfi=cor(meanmfi,lambda,method="spearman"),
+         corprev=cor(prevroc,lambda,method="spearman")) %>%
+  slice(1)
+
+```
+
+Figure of results
+```{r foi vs mfi figure}
+pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
+  facet_grid(~antigenf)+
+  geom_point(,alpha=0.7) +
+  # geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
+  geom_smooth(method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dfoicorr,
+            aes(x=2.5,y=0.6,label=paste("rho ==",sprintf("%1.2f",cormfi)) ),
+            parse=TRUE,col="grey30") +
+  scale_x_continuous(breaks=2:4)+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(xlim=c(1.5,4),ylim=c(0,0.7)) +
+  labs(x="community mean log10 MFI",y=expression(paste("community seroconversion rate (",lambda,")"))) +
+  theme_minimal() +
+  theme(legend.position="none")
+pfoivmfi
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-mfi-v-foi.png"),plot=pfoivmfi,device="png",width=8,height=2.5)
+
+```
+```{r foi vs prev figure}
+pfoivprev <- ggplot(data=d_foi,aes(x=prevroc,y=lambda,color=antigenf)) +
+  facet_grid(~antigenf)+
+  geom_point(alpha=0.7) +
+  # geom_smooth(method="glm",color="gray40",lwd=0.5,se=FALSE) +
+  geom_smooth(method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dfoicorr,
+            aes(x=0.2,y=0.6,label=paste("rho ==",sprintf("%1.2f",corprev)) ),
+            parse=TRUE,col="grey30") +
+  scale_x_continuous(breaks=seq(0,1,by=0.2),labels=seq(0,100,by=20))+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(xlim=c(0,1),ylim=c(0,0.7)) +
+  labs(x="community seroprevalence (%)",y=expression(paste("community seroconversion rate (",lambda,")"))) +
+  theme_minimal() +
+  theme(legend.position="none")
+pfoivprev
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-prev-v-foi.png"),plot=pfoivprev,device="png",width=8,height=3)
+```
+
+# Comparison with Kato-Katz
+
+```{r cluster means vs kk}
+
+dlckk <- dl %>%
+  group_by(community,antigenf) %>%
+  filter(antigen %in% c("ashb","sea")) %>%
+  mutate(posroc=ifelse(logmfi>roccut,1,0),
+         logkk=ifelse(epg>0,log10(epg),log10(1)),
+         poskk=ifelse(epg>0,1,0)) %>%
+  summarize(n=n(),
+            meanmfi=mean(logmfi),
+            prevroc=mean(posroc),
+            meankk=mean(logkk,na.rm=T),
+            prevkk=mean(poskk,na.rm=T))
+
+
+# estimate pearson correlation
+dcorrkk <- dlckk %>%
+  ungroup() %>%
+  group_by(antigenf) %>%
+  mutate(corspkk=cor(prevroc,prevkk,method="spearman"),
+         cormukk=cor(meanmfi,prevkk,method="spearman"),
+         cormukkmu=cor(meanmfi,meankk,method="spearman")) %>%
+  slice(1)
+
+```
+
+Figure of results
+
+```{r mfi and prev vs kk}
+# KK prevalence versus MFI
+pmfivkk <- ggplot(data=dlckk,aes(x=prevkk,color=antigenf)) +
+  facet_grid(~antigenf) +
+  geom_point(aes(y=meanmfi),alpha=0.7) +
+  geom_smooth(aes(y=meanmfi),method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dcorrkk,
+            aes(x=0,y=4,label=paste("rho ==",sprintf("%1.2f",cormukk)) ),
+            parse=TRUE,col="grey30",hjust=0) +
+  scale_x_continuous(breaks=seq(0,0.6,by=0.2),labels=seq(0,60,by=20))+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(xlim=c(0,0.6),ylim=c(1,4.5)) +
+  labs(y="community mean log10 MFI",x="community prevalence by Kato-Katz (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pmfivkk
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-mfi-v-kkprev.png"),plot=pmfivkk,device="png",width=5,height=3)
+
+
+# KK mean versus MFI
+pmfivkkmean <- ggplot(data=dlckk,aes(x=meankk,color=antigenf)) +
+  facet_grid(~antigenf) +
+  geom_point(aes(y=meanmfi),alpha=0.7) +
+  geom_smooth(aes(y=meanmfi),method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_text(data=dcorrkk,
+            aes(x=0,y=4,label=paste("rho ==",sprintf("%1.2f",cormukkmu)) ),
+            parse=TRUE,col="grey30",hjust=0) +
+  scale_x_continuous(breaks=seq(0,1,by=0.2))+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(xlim=c(0,1.1),ylim=c(1,4.5)) +
+  labs(y="community mean log10 MFI",x="community mean log10 eggs per gram (Kato-Katz)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pmfivkkmean
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-mfi-v-kkmean.png"),plot=pmfivkkmean,device="png",width=5,height=3)
+
+# KK prevalence versus seroprevalence
+pspvkk <- ggplot(data=dlckk,aes(x=prevkk,color=antigenf)) +
+  facet_grid(~antigenf) +
+  geom_point(aes(y=prevroc),alpha=0.7) +
+  geom_smooth(aes(y=prevroc),method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_abline(intercept=0,slope=1,lty="dashed",color="gray40",lwd=0.25)+
+  geom_text(data=dcorrkk,
+            aes(x=0.1,y=0.8,label=paste("rho ==",sprintf("%1.2f",corspkk)) ),
+            parse=TRUE,col="grey30",hjust=0) +
+  scale_y_continuous(breaks=seq(0,0.8,by=0.2),labels=seq(0,80,by=20))+
+  scale_x_continuous(breaks=seq(0,0.8,by=0.2),labels=seq(0,80,by=20))+
+  scale_color_manual(values=pcols)+
+  coord_cartesian(ylim=c(0,0.9),xlim=c(0,0.9)) +
+  labs(y="community seroprevalence (%)",x="community prevalence by Kato-Katz (%)") +
+  theme_minimal() +
+  theme(legend.position="none")
+pspvkk
+
+# save png file for presentation
+ggsave(filename=here("output","mbita-serop-v-kkprev.png"),plot=pspvkk,device="png",width=5,height=3)
+
+
+
+
+```
+
+
+# Effect of smaller samples
+
+Downsample the observations within each community to see how that influences the relationships
+
+Note: this analysis probably won't contribute to the presentation because not sufficient time to think about it and interpret it. 
+
+```{r community downsample}
+
+# estimate means with sample sizes of betweeen 10 and 50 observations
+set.seed(123)
+ssests <- foreach(ssi=seq(100,10,by=-10),.combine=rbind) %:% 
+  foreach(iteri=1:1000,.combine=rbind) %dopar% {
+    di <- dl %>%
+    group_by(community,antigenf) %>%
+    sample_n(size=ssi,replace=TRUE) %>%
+    summarize(meanmfi=mean(logmfi),
+              seroprev=mean(seropos)) %>%
+    mutate(ss=ssi,iter=iteri)
+}
+
+# merge in the means with the full sample
+dlc2 <- dlc %>%
+  select(community,antigenf,n,mean=meanmfi,serop=prevroc) %>%
+  left_join(select(d_foi,community,antigenf,lambda),by=c("community","antigenf")) %>%
+  mutate(antigenf=factor(antigenf,levels=levels(dl$antigenf)))
+ssests2 <- left_join(ssests,dlc2,by=c("community","antigenf"))
+
+
+# average over bootstrap estimates
+ssmeans <- ssests2 %>%
+  group_by(community,antigenf,ss) %>%
+  summarize(mean=mean(mean),
+            mu=mean(meanmfi),
+            mu_sd=sd(meanmfi),
+            mu_lb=quantile(meanmfi,probs=c(0.025)),
+            mu_ub=quantile(meanmfi,probs=c(0.975)),
+            mu_mse=mean((meanmfi-mean)^2),
+            mu_bias=mean(meanmfi-mean),
+            
+            serop=mean(serop),
+            prev=mean(seroprev),
+            prev_sd=sd(seroprev),
+            prev_lb=quantile(seroprev,probs=c(0.025)),
+            prev_ub=quantile(seroprev,probs=c(0.975)),
+            prev_mse=mean((seroprev-serop)^2),
+            prev_bias=mean(seroprev-serop)
+            )
+
+# correlation betwen community-level means and seroprev, over bootstrap estimates
+sscorr <- ssests2 %>%
+  group_by(antigenf,ss,iter) %>%
+  summarize(cor_mean=cor(meanmfi,serop,method="pearson"),
+            cor_prev=cor(seroprev,serop,method="pearson")) %>%
+  ungroup() %>%
+  group_by(antigenf,ss) %>%
+  summarize(cor_mu=mean(cor_mean),
+            cor_mu_lb=quantile(cor_mean,probs=c(0.025)),
+            cor_mu_ub=quantile(cor_mean,probs=c(0.975)),
+            cor_pr=mean(cor_prev),
+            cor_pr_lb=quantile(cor_prev,probs=c(0.025)),
+            cor_pr_ub=quantile(cor_prev,probs=c(0.975)),
+            )
+
+# correlation betwen community-level means and seroprev, over bootstrap estimates
+sscorr_foi <- ssests2 %>%
+  group_by(antigenf,ss,iter) %>%
+  filter(!is.na(lambda)) %>%
+  summarize(cor_mean=cor(meanmfi,lambda,method="spearman"),
+            cor_prev=cor(seroprev,lambda,method="spearman")) %>%
+  ungroup() %>%
+  group_by(antigenf,ss) %>%
+  summarize(cor_mu=mean(cor_mean),
+            cor_mu_lb=quantile(cor_mean,probs=c(0.025)),
+            cor_mu_ub=quantile(cor_mean,probs=c(0.975)),
+            cor_pr=mean(cor_prev),
+            cor_pr_lb=quantile(cor_prev,probs=c(0.025)),
+            cor_pr_ub=quantile(cor_prev,probs=c(0.975)),
+            )
+
+```
+Plot a figure of RMSE in community-level estimates by sample size.
+```{r downsample rmse figs}
+ssmumsep <- ggplot(data=ssmeans,aes(x=ss,y=sqrt(mu_mse),group=community)) +
+  facet_grid(.~antigenf)+
+  geom_line(alpha=0.2) +
+  theme_minimal()
+ssmumsep
+
+ssprevmsep <- ggplot(data=ssmeans,aes(x=ss,y=sqrt(prev_mse),group=community)) +
+  facet_grid(.~antigenf)+
+  geom_line(alpha=0.2) +
+  theme_minimal()
+ssprevmsep
+
+```
+
+Plot a figure of the correlation between the seroprevalence estimated in the full sample versus cluster level mean (blue) or cluster level seroprevalence (orange) estimated at each smaller sample size
+
+```{r downsample corr figure}
+sscorp <- ggplot(data=sscorr,aes(x=ss)) +
+  facet_grid(.~antigenf)+
+  geom_ribbon(aes(ymin=cor_mu_lb,ymax=cor_mu_ub),color=NA,fill=cblue,alpha=0.2)+
+  geom_line(aes(y=cor_mu),color=cblue) +
+  geom_ribbon(aes(ymin=cor_pr_lb,ymax=cor_pr_ub),color=NA,fill=corange,alpha=0.2)+
+  geom_line(aes(y=cor_pr),color=corange)+
+  coord_cartesian(ylim=c(0,1))+
+  labs(y="Correlation with community level seroprevalence",x="Sample size per community") +
+  theme_minimal()
+sscorp
+
+```
+
+Plot a figure of the correlation between the seroconversion rate estimated in the full sample versus cluster level mean (blue) or cluster level seroprevalence (orange) estimated at each smaller sample size
+
+```{r downsample corr foi figure}
+sscorfoip <- ggplot(data=sscorr_foi,aes(x=ss)) +
+  facet_grid(.~antigenf)+
+  geom_ribbon(aes(ymin=cor_mu_lb,ymax=cor_mu_ub),color=NA,fill=cblue,alpha=0.2)+
+  geom_line(aes(y=cor_mu),color=cblue) +
+  geom_ribbon(aes(ymin=cor_pr_lb,ymax=cor_pr_ub),color=NA,fill=corange,alpha=0.2)+
+  geom_line(aes(y=cor_pr),color=corange)+
+  coord_cartesian(ylim=c(0,1))+
+  labs(y="Correlation with community level seroconversion rate",x="Sample size per community") +
+  theme_minimal()
+sscorfoip
+
+```
+
+Based on these figures, there is no loss of information from reducing quantitative measures to seroprevalence, and if anything seroprevalence performs slightly better with respect to correlation measures.
+
+
+
+
+
