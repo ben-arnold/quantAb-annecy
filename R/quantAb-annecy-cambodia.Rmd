@@ -281,7 +281,7 @@ pagemfi <- ggplot(data=fit_mfi,aes(x=age,y=fit,color=antigenf)) +
   geom_smooth(method="loess",se=FALSE,lwd=0.5,color="black") +
   scale_color_manual(values=pcols)+
   scale_y_continuous(breaks=seq(0,4,by=1))+
-  labs(x="age, years",y="log10 Luminex Response (MFI-bg)") +
+  labs(x="age, years",y="log10 Luminex response (MFI-bg)") +
   theme_minimal() +
   theme(legend.position="none")
 
@@ -385,7 +385,7 @@ pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
   scale_color_manual(values=pcols)+
   scale_y_continuous(breaks=seq(0,1,by=0.1),labels=seq(0,100,by=10))+
   coord_cartesian(ylim=c(0,1),xlim=c(1,4.5)) +
-  labs(x="cluster mean log10 MFI",y="cluster seroprevalence (%)") +
+  labs(x="cluster mean log10 Luminex response (MFI-bg)",y="cluster seroprevalence (%)") +
   theme_minimal() +
   theme(legend.position="none")
 pmfivprev
