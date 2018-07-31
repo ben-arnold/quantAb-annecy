@@ -40,7 +40,9 @@ pcols <- c(ggplotcols,cmagent,corange)
 ```
 
 # Load coastal Kenya measurements
-Load AsHb measurements and filter 
+Load antibody measurements. 
+These data are available through OSF:
+https://osf.io/taknp/
 
 ```{r load data, warning=FALSE}
 d <- readRDS(here("data","coastal_kenya.rds"))

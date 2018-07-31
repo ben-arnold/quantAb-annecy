@@ -39,6 +39,11 @@ pcols <- c(ggplotcols[2:3],cmagent,ggplotcols[1],corange)
 
 # Load Cambodia measurements
 
+These data are publicly available here:
+https://osf.io/2kr8b/
+
+See also:
+Arnold et al. Integrated Serologic Surveillance of Population Immunity and Disease Transmission, Emerging Infectious Diseases, 2018; 24(7):1188-1194. https://www.ncbi.nlm.nih.gov/pubmed/29912680
 
 ```{r load data, warning=FALSE}
 d <- readRDS(here("data","cambodia_serology_public.rds"))
