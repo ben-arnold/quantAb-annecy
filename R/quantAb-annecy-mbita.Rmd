@@ -45,8 +45,10 @@ pcols <- c(ggplotcols,corange)
 
 ```
 
-# Load coastal Kenya measurements
-Load AsHb measurements and filter 
+# Load Mbita Kenya antibody measurements
+
+Note: at this time these data are not yet publicly available. They are from this study:
+Won KY, Kanyi HM, Mwende FM, Wiegand RE, Brook Goodhew E, Priest JW, et al. Multiplex Serologic Assessment of Schistosomiasis in Western Kenya: Antibody Responses in Preschool Age Children as a Measure of Reduced Transmission. _Am J Trop Med Hyg._ 2017; 16–0665. https://www.ncbi.nlm.nih.gov/pubmed/28719280
 
 ```{r load data, warning=FALSE}
 d <- readRDS(here("data","mbita_psac.rds"))
@@ -417,7 +419,7 @@ pmfivprev <- ggplot(data=dlc,aes(x=meanmfi,color=antigenf)) +
   scale_y_continuous(breaks=seq(0,1,by=0.2),labels=seq(0,100,by=20))+
   scale_color_manual(values=pcols)+
   coord_cartesian(ylim=c(0,1),xlim=c(1,4.5)) +
-  labs(x="community mean log10 MFI",y="community seroprevalence (%)") +
+  labs(x="community mean log10 Luminex response (MFI-bg)",y="community seroprevalence (%)") +
   theme_minimal() +
   theme(legend.position="none")
 pmfivprev
@@ -491,7 +493,7 @@ pfoivmfi <- ggplot(data=d_foi,aes(x=meanmfi,y=lambda,color=antigenf)) +
   scale_x_continuous(breaks=2:4)+
   scale_color_manual(values=pcols)+
   coord_cartesian(xlim=c(1.5,4),ylim=c(0,0.7)) +
-  labs(x="community mean log10 MFI",y=expression(paste("community seroconversion rate (",lambda,")"))) +
+  labs(x="community mean log10 Luminex response (MFI-bg)",y=expression(paste("community seroconversion rate (",lambda,")"))) +
   theme_minimal() +
   theme(legend.position="none")
 pfoivmfi
@@ -553,17 +555,17 @@ Figure of results
 
 ```{r mfi and prev vs kk}
 # KK prevalence versus MFI
-pmfivkk <- ggplot(data=dlckk,aes(x=prevkk,color=antigenf)) +
+pmfivkk <- ggplot(data=dlckk,aes(x=meanmfi,color=antigenf)) +
   facet_grid(~antigenf) +
-  geom_point(aes(y=meanmfi),alpha=0.7) +
-  geom_smooth(aes(y=meanmfi),method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_point(aes(y=prevkk),alpha=0.7) +
+  geom_smooth(aes(y=prevkk),method="loess",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorrkk,
-            aes(x=0,y=4,label=paste("rho ==",sprintf("%1.2f",cormukk)) ),
+            aes(x=1,y=0.55,label=paste("rho ==",sprintf("%1.2f",cormukk)) ),
             parse=TRUE,col="grey30",hjust=0) +
-  scale_x_continuous(breaks=seq(0,0.6,by=0.2),labels=seq(0,60,by=20))+
+  scale_y_continuous(breaks=seq(0,0.6,by=0.2),labels=seq(0,60,by=20))+
   scale_color_manual(values=pcols)+
-  coord_cartesian(xlim=c(0,0.6),ylim=c(1,4.5)) +
-  labs(y="community mean log10 MFI",x="community prevalence by Kato-Katz (%)") +
+  coord_cartesian(ylim=c(0,0.6),xlim=c(1,4.5)) +
+  labs(x="community mean log10 Luminex response",y="community prevalence by Kato-Katz (%)") +
   theme_minimal() +
   theme(legend.position="none")
 pmfivkk
@@ -573,17 +575,17 @@ ggsave(filename=here("output","mbita-mfi-v-kkprev.png"),plot=pmfivkk,device="png
 
 
 # KK mean versus MFI
-pmfivkkmean <- ggplot(data=dlckk,aes(x=meankk,color=antigenf)) +
+pmfivkkmean <- ggplot(data=dlckk,aes(x=meanmfi,color=antigenf)) +
   facet_grid(~antigenf) +
-  geom_point(aes(y=meanmfi),alpha=0.7) +
-  geom_smooth(aes(y=meanmfi),method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_point(aes(y=meankk),alpha=0.7) +
+  geom_smooth(aes(y=meankk),method="loess",color="gray40",lwd=0.5,se=FALSE) +
   geom_text(data=dcorrkk,
-            aes(x=0,y=4,label=paste("rho ==",sprintf("%1.2f",cormukkmu)) ),
+            aes(x=1,y=1,label=paste("rho ==",sprintf("%1.2f",cormukkmu)) ),
             parse=TRUE,col="grey30",hjust=0) +
-  scale_x_continuous(breaks=seq(0,1,by=0.2))+
+  scale_y_continuous(breaks=seq(0,1,by=0.2))+
   scale_color_manual(values=pcols)+
-  coord_cartesian(xlim=c(0,1.1),ylim=c(1,4.5)) +
-  labs(y="community mean log10 MFI",x="community mean log10 eggs per gram (Kato-Katz)") +
+  coord_cartesian(ylim=c(0,1.1),xlim=c(1,4.5)) +
+  labs(x="community mean log10 Luminex response",y="community mean log10 eggs per gram") +
   theme_minimal() +
   theme(legend.position="none")
 pmfivkkmean
@@ -592,10 +594,10 @@ pmfivkkmean
 ggsave(filename=here("output","mbita-mfi-v-kkmean.png"),plot=pmfivkkmean,device="png",width=5,height=3)
 
 # KK prevalence versus seroprevalence
-pspvkk <- ggplot(data=dlckk,aes(x=prevkk,color=antigenf)) +
+pspvkk <- ggplot(data=dlckk,aes(x=prevroc,color=antigenf)) +
   facet_grid(~antigenf) +
-  geom_point(aes(y=prevroc),alpha=0.7) +
-  geom_smooth(aes(y=prevroc),method="loess",color="gray40",lwd=0.5,se=FALSE) +
+  geom_point(aes(y=prevkk),alpha=0.7) +
+  geom_smooth(aes(y=prevkk),method="loess",color="gray40",lwd=0.5,se=FALSE) +
   geom_abline(intercept=0,slope=1,lty="dashed",color="gray40",lwd=0.25)+
   geom_text(data=dcorrkk,
             aes(x=0.1,y=0.8,label=paste("rho ==",sprintf("%1.2f",corspkk)) ),
@@ -604,7 +606,7 @@ pspvkk <- ggplot(data=dlckk,aes(x=prevkk,color=antigenf)) +
   scale_x_continuous(breaks=seq(0,0.8,by=0.2),labels=seq(0,80,by=20))+
   scale_color_manual(values=pcols)+
   coord_cartesian(ylim=c(0,0.9),xlim=c(0,0.9)) +
-  labs(y="community seroprevalence (%)",x="community prevalence by Kato-Katz (%)") +
+  labs(x="community seroprevalence (%)",y="community prevalence by Kato-Katz (%)") +
   theme_minimal() +
   theme(legend.position="none")
 pspvkk
